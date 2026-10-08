@@ -12,6 +12,9 @@ on:
       - 'pefy-uiux-governed-design/**'
       - '.agents/skills/pefy-uiux-governed-design/**'
       - '.github/workflows/pefy-uiux-runtime-smoke.yml'
+  schedule:
+    # Weekly regression and vulnerability recheck of approved release, no auto-upgrade.
+    - cron: "17 5 * * 1"
   workflow_dispatch:
 
 permissions:
@@ -25,6 +28,7 @@ jobs:
     env:
       # Explicit freeze; review package, signature and vulnerabilities before upgrading.
       UIPRO_VERSION: "2.15.0"
+      UIPRO_NPM_INTEGRITY: "sha512-D0J/C40xrzzi5si6ZLtRGbEE5v3QjL7d4wJNnasmP3yfDSrGiuqVCdwQiqCNnIkbqOuVoA/uonR2o1WKXh3urw=="
       npm_config_ignore_scripts: "true"
       npm_config_audit: "true"
       npm_config_fund: "false"
@@ -61,8 +65,9 @@ jobs:
           from pathlib import Path
           d=json.loads((Path(os.environ['RUNNER_TEMP'])/'uiux-package-metadata.json').read_text())
           assert d.get('version') == os.environ['UIPRO_VERSION'], d
-          assert (d.get('dist.integrity') or d.get('dist',{}).get('integrity','')).startswith('sha512-'), d
-          print('Verified pinned npm version and published integrity metadata (not independent supply-chain attestation).')
+          observed = d.get('dist.integrity') or d.get('dist',{}).get('integrity','')
+          assert observed == os.environ['UIPRO_NPM_INTEGRITY'], 'Published package integrity differs from approved lock value'
+          print('Verified immutable pinned npm version and expected SHA512 integrity metadata (not independent supply-chain attestation).')
           PY
 
       - name: Fail on known high-severity runtime dependency advisories
