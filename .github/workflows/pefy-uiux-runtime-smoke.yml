@@ -1,0 +1,119 @@
+name: PEFY UI UX Pro Max Runtime Smoke
+
+on:
+  pull_request:
+    paths:
+      - 'pefy-uiux-governed-design/**'
+      - '.agents/skills/pefy-uiux-governed-design/**'
+      - '.github/workflows/pefy-uiux-runtime-smoke.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'pefy-uiux-governed-design/**'
+      - '.agents/skills/pefy-uiux-governed-design/**'
+      - '.github/workflows/pefy-uiux-runtime-smoke.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  runtime-validation:
+    name: Pinned official CLI + design-system smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      # Explicit freeze; review package, signature and vulnerabilities before upgrading.
+      UIPRO_VERSION: "2.15.0"
+      npm_config_ignore_scripts: "true"
+      npm_config_audit: "true"
+      npm_config_fund: "false"
+    steps:
+      - name: Checkout untrusted repo content with read-only token
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Verify documented PEFY-GG companion skill
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -s pefy-uiux-governed-design/SKILL.md
+          test -s .agents/skills/pefy-uiux-governed-design/SKILL.md
+          grep -q '^name: pefy-uiux-governed-design' pefy-uiux-governed-design/SKILL.md
+          grep -q 'WCAG 2.2 AA' pefy-uiux-governed-design/SKILL.md
+
+      - name: Verify Node and Python runtimes
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --version
+          npm --version
+          python3 --version
+
+      - name: Inspect pinned package metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm view "ui-ux-pro-max-cli@${UIPRO_VERSION}" version dist.integrity --json > "${RUNNER_TEMP}/uiux-package-metadata.json"
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          d=json.loads((Path(os.environ['RUNNER_TEMP'])/'uiux-package-metadata.json').read_text())
+          assert d.get('version') == os.environ['UIPRO_VERSION'], d
+          assert (d.get('dist.integrity') or d.get('dist',{}).get('integrity','')).startswith('sha512-'), d
+          print('Verified pinned npm version and published integrity metadata (not independent supply-chain attestation).')
+          PY
+
+      - name: Fail on known high-severity runtime dependency advisories
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "${RUNNER_TEMP}/uiux-dependency-audit"
+          cd "${RUNNER_TEMP}/uiux-dependency-audit"
+          npm init -y --silent >/dev/null
+          npm install --package-lock-only --save-exact --ignore-scripts --no-fund "ui-ux-pro-max-cli@${UIPRO_VERSION}" >/dev/null
+          npm audit --omit=dev --audit-level=high
+          
+      - name: Install official skill in isolated CI workspace
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "${RUNNER_TEMP}/uiux-smoke"
+          cd "${RUNNER_TEMP}/uiux-smoke"
+          # npx download goes to ephemeral runner and never modifies the user account.
+          npx --yes "ui-ux-pro-max-cli@${UIPRO_VERSION}" init --ai universal --offline
+          test -s .agents/skills/ui-ux-pro-max/SKILL.md
+          test -s .agents/skills/ui-ux-pro-max/scripts/search.py
+          echo 'SKILL_PRESENT=true' >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Execute real design-system query
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "${RUNNER_TEMP}/uiux-smoke"
+          python3 .agents/skills/ui-ux-pro-max/scripts/search.py "inclusive fintech mobile banking low bandwidth" --design-system -p "PEFY-GG CI" -f markdown > "${RUNNER_TEMP}/uiux-design-system.md"
+          test -s "${RUNNER_TEMP}/uiux-design-system.md"
+          python3 - <<'PY'
+          from pathlib import Path
+          import os
+          p=Path(os.environ['RUNNER_TEMP'])/'uiux-design-system.md'
+          s=p.read_text(encoding='utf-8')
+          assert len(s) >= 300, f"Too little output: {len(s)}"
+          required=['COLOR','TYPOGRAPH','STYLE']
+          missing=[q for q in required if q not in s.upper()]
+          assert not missing, f"Missing expected design-system sections: {missing}"
+          print('Executed official v2.15.0 design-system query successfully.')
+          PY
+          echo 'DESIGN_SYSTEM_SMOKE=passed' >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Document evidence boundary
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo '### PEFY UI UX Pro Max runner smoke'
+            echo "Pinned npm release: ${UIPRO_VERSION}"
+            echo 'Scope: ephemeral GitHub Actions runner only.'
+            echo 'Not evidence of account-wide ChatGPT/Codex installation, accessibility certification or production deployment.'
+          } >> "${GITHUB_STEP_SUMMARY}"
