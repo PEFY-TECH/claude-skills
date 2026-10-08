@@ -58,7 +58,7 @@ jobs:
           from pathlib import Path
           d=json.loads((Path(os.environ['RUNNER_TEMP'])/'uiux-package-metadata.json').read_text())
           assert d.get('version') == os.environ['UIPRO_VERSION'], d
-          assert d.get('dist',{}).get('integrity','').startswith('sha512-'), d
+          assert (d.get('dist.integrity') or d.get('dist',{}).get('integrity','')).startswith('sha512-'), d
           print('Verified pinned npm version and published integrity metadata (not independent supply-chain attestation).')
           PY
 
